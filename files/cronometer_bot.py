@@ -182,16 +182,22 @@ NUTRIENT_IDS = {
 
 
 def lookup_food(ingredient_name: str) -> dict | None:
-    """Search USDA FDC and return per-100g nutrient values for the best match."""
+    """Search USDA FDC and return per-100g nutrient values for the best match.
+    Treats any request failure (including USDA rejecting oddly-formatted
+    queries, e.g. "ground beef (80/20)" with a 400) as a non-match rather
+    than crashing the whole pipeline over one ingredient."""
     params = {
         "api_key": USDA_API_KEY,
         "query": ingredient_name,
         "pageSize": 3,
         "dataType": ["Foundation", "SR Legacy"],  # prefer generic/whole foods
     }
-    resp = requests.get(USDA_SEARCH_URL, params=params, timeout=10)
-    resp.raise_for_status()
-    results = resp.json().get("foods", [])
+    try:
+        resp = requests.get(USDA_SEARCH_URL, params=params, timeout=10)
+        resp.raise_for_status()
+        results = resp.json().get("foods", [])
+    except requests.RequestException:
+        return None
     if not results:
         return None
 

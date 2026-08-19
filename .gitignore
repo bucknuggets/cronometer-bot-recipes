@@ -2,6 +2,8 @@
 __pycache__/
 *.pyc
 seen_comments.sqlite3
+pending_requests.sqlite3
+dashboard.html
 .env
 files.zip
 .DS_Store
