@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+seen_comments.sqlite3
+.env
+files.zip
+.DS_Store
