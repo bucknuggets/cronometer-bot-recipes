@@ -1,10 +1,11 @@
 """
 Reddit Nutrition Bot
 ---------------------
-Watches a subreddit for comments like "!cronometer 2 servings" replying to a
-recipe comment, extracts the recipe's ingredients with a local Ollama model,
-looks up nutrition data via USDA FoodData Central, scales it to the requested
-serving count, and posts a formatted nutrition breakdown as a reply.
+Watches one or more subreddits for comments like "!cronometer 2 servings"
+replying to a recipe comment, extracts the recipe's ingredients with a local
+Ollama model, looks up nutrition data via USDA FoodData Central, scales it to
+the requested serving count, and posts a formatted nutrition breakdown as a
+reply.
 
 Setup:
     pip install praw requests
@@ -19,7 +20,8 @@ file loaded by your shell, or export them directly):
     REDDIT_PASSWORD
     REDDIT_USER_AGENT       e.g. "cronometer-bot/0.1 by u/yourusername"
     USDA_API_KEY            get a free key at https://api.data.gov/signup
-    SUBREDDIT_NAME          e.g. "cooking" or "test" (no "r/" prefix)
+    SUBREDDIT_NAME          comma-separated, no "r/" prefix,
+                            e.g. "cooking,recipes,MealPrepSunday"
 
 Optional:
     OLLAMA_URL              default "http://localhost:11434/api/chat"
@@ -78,7 +80,7 @@ reddit = praw.Reddit(
     user_agent=os.environ["REDDIT_USER_AGENT"],
 )
 
-SUBREDDIT_NAME = os.environ["SUBREDDIT_NAME"]
+SUBREDDIT_NAMES = [s.strip() for s in os.environ["SUBREDDIT_NAME"].split(",") if s.strip()]
 
 # ---------------------------------------------------------------------------
 # Dedup storage — avoid double-replying if the bot restarts
@@ -352,8 +354,10 @@ def handle_trigger_comment(comment, conn):
 
 def main():
     conn = init_seen_db()
-    subreddit = reddit.subreddit(SUBREDDIT_NAME)
-    print(f"Watching r/{SUBREDDIT_NAME} for !cronometer triggers...")
+    # praw natively supports watching multiple subreddits at once via a
+    # "+"-joined name, e.g. reddit.subreddit("cooking+recipes+MealPrepSunday")
+    subreddit = reddit.subreddit("+".join(SUBREDDIT_NAMES))
+    print(f"Watching {', '.join('r/' + n for n in SUBREDDIT_NAMES)} for !cronometer triggers...")
 
     for comment in subreddit.stream.comments(skip_existing=True):
         if already_replied(conn, comment.id):
