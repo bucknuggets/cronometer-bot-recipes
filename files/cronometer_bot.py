@@ -2,12 +2,14 @@
 Reddit Nutrition Bot
 ---------------------
 Watches a subreddit for comments like "!cronometer 2 servings" replying to a
-recipe comment, extracts the recipe's ingredients with Claude, looks up
-nutrition data via USDA FoodData Central, scales it to the requested serving
-count, and posts a formatted nutrition breakdown as a reply.
+recipe comment, extracts the recipe's ingredients with a local Ollama model,
+looks up nutrition data via USDA FoodData Central, scales it to the requested
+serving count, and posts a formatted nutrition breakdown as a reply.
 
 Setup:
-    pip install praw anthropic requests
+    pip install praw requests
+    Ollama must be running locally with OLLAMA_MODEL pulled (default
+    qwen2.5:7b): `ollama pull qwen2.5:7b`
 
 Environment variables required (set these before running, e.g. in a .env
 file loaded by your shell, or export them directly):
@@ -16,9 +18,12 @@ file loaded by your shell, or export them directly):
     REDDIT_USERNAME
     REDDIT_PASSWORD
     REDDIT_USER_AGENT       e.g. "cronometer-bot/0.1 by u/yourusername"
-    ANTHROPIC_API_KEY
     USDA_API_KEY            get a free key at https://api.data.gov/signup
     SUBREDDIT_NAME          e.g. "cooking" or "test" (no "r/" prefix)
+
+Optional:
+    OLLAMA_URL              default "http://localhost:11434/api/chat"
+    OLLAMA_MODEL            default "qwen2.5:7b"
 
 Run:
     python cronometer_bot.py
@@ -33,7 +38,6 @@ import time
 import sqlite3
 import requests
 import praw
-from anthropic import Anthropic
 from github_publish import publish_recipe_page
 
 # ---------------------------------------------------------------------------
@@ -41,7 +45,8 @@ from github_publish import publish_recipe_page
 # ---------------------------------------------------------------------------
 
 TRIGGER_RE = re.compile(r"!cronometer\s*(\d+)?\s*(?:serving)?", re.IGNORECASE)
-CLAUDE_MODEL = "claude-haiku-4-5-20251001"
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/chat")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 USDA_SEARCH_URL = "https://api.nal.usda.gov/fdc/v1/foods/search"
 USDA_API_KEY = os.environ["USDA_API_KEY"]
 SEEN_DB_PATH = "seen_comments.sqlite3"
@@ -51,7 +56,19 @@ SEEN_DB_PATH = "seen_comments.sqlite3"
 # passing through your own accounts. Replace with your real fundraiser URL.
 DONATE_URL = "https://www.every.org/REPLACE-WITH-YOUR-CHARITY/f/REPLACE-WITH-YOUR-FUNDRAISER-SLUG"
 
-anthropic_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+def ollama_chat(prompt: str, want_json: bool = False) -> str:
+    payload = {
+        "model": OLLAMA_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+    }
+    if want_json:
+        payload["format"] = "json"
+    resp = requests.post(OLLAMA_URL, json=payload, timeout=120)
+    resp.raise_for_status()
+    return resp.json()["message"]["content"].strip()
+
 
 reddit = praw.Reddit(
     client_id=os.environ["REDDIT_CLIENT_ID"],
@@ -130,17 +147,8 @@ Comment:
 
 
 def extract_recipe(comment_text: str) -> dict:
-    response = anthropic_client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=1500,
-        messages=[
-            {
-                "role": "user",
-                "content": EXTRACTION_PROMPT.replace("{comment_text}", comment_text),
-            }
-        ],
-    )
-    raw = response.content[0].text.strip()
+    prompt = EXTRACTION_PROMPT.replace("{comment_text}", comment_text)
+    raw = ollama_chat(prompt, want_json=True)
     raw = re.sub(r"^```(json)?|```$", "", raw, flags=re.MULTILINE).strip()
     return json.loads(raw)
 
@@ -211,7 +219,8 @@ what kind of meal/dish this is and when someone might eat it (e.g. quick \
 breakfast, cheap snack, hearty dinner, side dish), and (b) suggest one or two \
 complementary foods or dishes to pair with it, from a flavor and nutritional \
 completeness standpoint (e.g. if it's carb-heavy and low protein, suggest a \
-protein pairing).
+protein pairing). Pairing suggestions must be vegan / fully plant-based only \
+— no meat, fish, dairy, eggs, or honey.
 
 Recipe ingredients: {ingredients}
 Nutrition per serving: {nutrition}
@@ -221,21 +230,12 @@ Respond with just the 2-3 sentences, no preamble.
 
 
 def generate_summary(ingredient_names: list[str], per_serving: dict, servings: int) -> str:
-    response = anthropic_client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=300,
-        messages=[
-            {
-                "role": "user",
-                "content": SUMMARY_PROMPT.format(
-                    servings=servings,
-                    ingredients=", ".join(ingredient_names),
-                    nutrition=json.dumps({k: round(v, 1) for k, v in per_serving.items()}),
-                ),
-            }
-        ],
+    prompt = SUMMARY_PROMPT.format(
+        servings=servings,
+        ingredients=", ".join(ingredient_names),
+        nutrition=json.dumps({k: round(v, 1) for k, v in per_serving.items()}),
     )
-    return response.content[0].text.strip()
+    return ollama_chat(prompt)
 
 
 # ---------------------------------------------------------------------------

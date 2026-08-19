@@ -1,4 +1,5 @@
 praw>=7.7
-anthropic>=0.40
 requests>=2.31
-# requests also powers github_publish.py (GitHub Contents API calls)
+# requests also powers github_publish.py (GitHub Contents API calls) and the
+# Ollama HTTP client in cronometer_bot.py. Ollama itself runs separately
+# (https://ollama.com) — pull the model with `ollama pull qwen2.5:7b`.

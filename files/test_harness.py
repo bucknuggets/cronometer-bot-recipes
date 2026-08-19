@@ -5,7 +5,8 @@ Runs the recipe-extraction -> USDA lookup -> scaling -> reply-formatting
 pipeline on a sample recipe comment, without touching Reddit at all. Use this
 to sanity-check the nutrition math and reply formatting before going live.
 
-Requires ANTHROPIC_API_KEY and USDA_API_KEY (no Reddit credentials needed).
+Requires USDA_API_KEY and a running local Ollama instance with OLLAMA_MODEL
+pulled (no Reddit credentials needed).
 If GITHUB_TOKEN, GITHUB_OWNER, and GITHUB_REPO are also set, it will publish
 real test pages to your GitHub Pages repo so you can check those too —
 otherwise it skips that step automatically.
@@ -134,7 +135,7 @@ def run_pipeline(recipe_text: str, requested_servings: int):
 
 def main():
     # Quick check that required keys are set before burning API calls.
-    for var in ("ANTHROPIC_API_KEY", "USDA_API_KEY"):
+    for var in ("USDA_API_KEY",):
         if not os.environ.get(var):
             raise SystemExit(f"Missing required env var: {var}")
 

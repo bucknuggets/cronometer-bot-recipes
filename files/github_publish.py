@@ -109,6 +109,11 @@ def publish_recipe_page(comment_id: str, title: str, ingredient_names: list[str]
         "message": f"Add recipe page: {slug}",
         "content": content_b64,
     }
+    existing = requests.get(f"{API_BASE}/{path}", headers=HEADERS, timeout=15)
+    if existing.status_code == 200:
+        payload["sha"] = existing.json()["sha"]
+        payload["message"] = f"Update recipe page: {slug}"
+
     resp = requests.put(f"{API_BASE}/{path}", headers=HEADERS, json=payload, timeout=15)
 
     if resp.status_code not in (200, 201):
