@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import re
+import html
 import base64
 import time
 import requests
@@ -45,7 +46,8 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   body {{ font-family: -apple-system, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; color: #1a1a1a; }}
-  h1 {{ font-size: 1.4em; }}
+  h1 {{ font-size: 1.4em; margin-bottom: 4px; }}
+  .authors {{ color: #666; font-size: 0.95em; margin-top: 0; }}
   table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
   td {{ padding: 8px 4px; border-bottom: 1px solid #eee; }}
   .ingredients {{ color: #555; font-size: 0.95em; }}
@@ -54,6 +56,7 @@ PAGE_TEMPLATE = """<!DOCTYPE html>
 </head>
 <body>
 <h1>{title}</h1>
+{authors_line}
 <p class="ingredients"><strong>Ingredients:</strong> {ingredients}</p>
 <table>
 {rows}
@@ -72,9 +75,10 @@ def slugify(text: str) -> str:
 
 
 def render_page(title: str, ingredient_names: list[str], per_serving: dict,
-                 servings: int, summary: str, reddit_comment_url: str | None = None) -> str:
+                 servings: int, summary: str, authors: list[str] | None = None,
+                 reddit_comment_url: str | None = None) -> str:
     rows = "\n".join(
-        f"<tr><td>{label}</td><td>{value}</td></tr>"
+        f"<tr><td>{html.escape(label)}</td><td>{value}</td></tr>"
         for label, value in [
             ("Servings", servings),
             ("Energy", f"{per_serving['energy_kcal']:.0f} kcal"),
@@ -86,24 +90,36 @@ def render_page(title: str, ingredient_names: list[str], per_serving: dict,
             ("Sodium", f"{per_serving['sodium_mg']:.0f} mg"),
         ]
     )
-    reddit_link = f'<a href="{reddit_comment_url}">View original Reddit comment</a>' if reddit_comment_url else ""
+    reddit_link = (
+        f'<a href="{html.escape(reddit_comment_url)}">View original Reddit comment</a>'
+        if reddit_comment_url else ""
+    )
+    if authors:
+        shown = authors[:2]
+        suffix = ", et al." if len(authors) > 2 else ""
+        authors_line = f'<p class="authors">by {html.escape(", ".join(shown))}{suffix}</p>'
+    else:
+        authors_line = ""
     return PAGE_TEMPLATE.format(
-        title=title,
-        ingredients=", ".join(ingredient_names),
+        title=html.escape(title),
+        authors_line=authors_line,
+        ingredients=html.escape(", ".join(ingredient_names)),
         rows=rows,
-        summary=summary,
+        summary=html.escape(summary),
         reddit_link=reddit_link,
     )
 
 
 def publish_recipe_page(comment_id: str, title: str, ingredient_names: list[str],
                          per_serving: dict, servings: int, summary: str,
+                         authors: list[str] | None = None,
                          reddit_comment_url: str | None = None) -> str:
     """Renders and pushes the recipe page to GitHub Pages. Returns the live URL."""
     slug = slugify(title) + "-" + comment_id
     path = f"recipes/{slug}.html"
-    html = render_page(title, ingredient_names, per_serving, servings, summary, reddit_comment_url)
-    content_b64 = base64.b64encode(html.encode("utf-8")).decode("ascii")
+    page_html = render_page(title, ingredient_names, per_serving, servings, summary,
+                             authors, reddit_comment_url)
+    content_b64 = base64.b64encode(page_html.encode("utf-8")).decode("ascii")
 
     payload = {
         "message": f"Add recipe page: {slug}",

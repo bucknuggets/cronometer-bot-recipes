@@ -61,6 +61,19 @@ SAMPLE_RECIPES = {
     "not_a_recipe": """
         Great post, I've been meaning to try this restaurant for weeks!
     """,
+    "credited_authors": """
+        This is my grandma Rosa's chickpea curry, my brother Dan tweaked the
+        spices a bit too. Serves 3:
+        - 2 cans chickpeas, drained
+        - 1 onion, diced
+        - 2 cloves garlic, minced
+        - 1 can coconut milk
+        - 1 tbsp curry powder
+        - 1 cup spinach
+
+        Saute onion and garlic, add curry powder, chickpeas, and coconut
+        milk. Simmer 15 minutes, stir in spinach until wilted.
+    """,
 }
 
 
@@ -113,6 +126,11 @@ def run_pipeline(recipe_text: str, requested_servings: int):
 
     page_url = None
     if GITHUB_CONFIGURED:
+        # Fake Reddit-poster username + a dummy comment link, just so the
+        # harness can show what the authors line / "view original comment"
+        # link look like — a real run supplies these from the actual
+        # triggering comment.
+        authors = ["u/test_user"] + recipe_data.get("credited_authors", [])
         page_url = publish_recipe_page(
             comment_id="test123",
             title=recipe_data.get("title", "Test Recipe"),
@@ -120,6 +138,8 @@ def run_pipeline(recipe_text: str, requested_servings: int):
             per_serving=per_serving,
             servings=requested_servings,
             summary=summary,
+            authors=authors,
+            reddit_comment_url="https://reddit.com/r/test/comments/abc123/example_post/def456/",
         )
         print(f"Published test page: {page_url}")
         print("-" * 70)
@@ -142,6 +162,7 @@ def main():
     run_pipeline(SAMPLE_RECIPES["lentil_soup"], requested_servings=2)
     run_pipeline(SAMPLE_RECIPES["no_serving_count"], requested_servings=1)
     run_pipeline(SAMPLE_RECIPES["not_a_recipe"], requested_servings=2)
+    run_pipeline(SAMPLE_RECIPES["credited_authors"], requested_servings=3)
 
 
 if __name__ == "__main__":

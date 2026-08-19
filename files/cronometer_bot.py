@@ -129,10 +129,16 @@ Also determine how many servings the recipe as written makes (if the \
 original comment doesn't state it, make a reasonable estimate based on the \
 quantities involved).
 
+Also check whether the recipe text explicitly credits an author or authors \
+by name, separate from whoever is posting it (e.g. "my grandma's recipe", \
+"recipe by Jane and Mike") — if so, list those names in "credited_authors"; \
+otherwise use an empty list.
+
 Respond with ONLY valid JSON, no other text, in this exact shape:
 {
   "title": "<short descriptive name for this dish, e.g. 'Red Lentil Soup'>",
   "original_servings": <number>,
+  "credited_authors": [<names explicitly credited in the text, if any>],
   "ingredients": [
     {"name": "<plain ingredient name for food-database lookup>", "grams": <number>}
   ]
@@ -282,22 +288,73 @@ def format_reply(per_serving: dict, servings: int, summary: str, page_url: str |
 
 
 # ---------------------------------------------------------------------------
+# Step 4.5: resolve where the recipe actually comes from
+# ---------------------------------------------------------------------------
+#
+# Normally that's the trigger comment's direct parent (the classic
+# "reply !cronometer to the recipe" flow). But if the trigger comment itself
+# contains a link to some other Reddit comment or post, pull the recipe from
+# there instead — this lets people trigger the bot on a recipe they found
+# elsewhere, not just one they're replying to directly.
+
+REDDIT_URL_RE = re.compile(r"https?://(?:www\.|old\.|new\.)?reddit\.com/r/\S+", re.IGNORECASE)
+
+
+def resolve_recipe_source(comment):
+    match = REDDIT_URL_RE.search(comment.body)
+    if not match:
+        return comment.parent()
+
+    url = match.group(0).rstrip(").,!?>'\"")
+    comment_id_match = re.search(r"/comments/[^/]+/[^/]+/([a-z0-9]+)", url)
+    if comment_id_match:
+        return reddit.comment(id=comment_id_match.group(1))
+    return reddit.submission(url=url)
+
+
+def source_text_and_author(source):
+    """Returns (recipe_text, permalink, reddit_username) for either a
+    Comment or a Submission (top-level trigger replies resolve to the post
+    itself, which uses selftext/title instead of body)."""
+    if isinstance(source, praw.models.Submission):
+        text = source.selftext or source.title
+    else:
+        text = getattr(source, "body", None)
+    author = source.author.name if source.author else None
+    permalink = f"https://reddit.com{source.permalink}"
+    return text, permalink, author
+
+
+def build_author_list(reddit_username: str | None, credited_authors: list[str]) -> list[str]:
+    """Combines the Reddit poster with anyone the recipe text explicitly
+    credits (e.g. "my grandma's recipe"), de-duplicated."""
+    authors = []
+    if reddit_username:
+        authors.append(f"u/{reddit_username}")
+    for name in credited_authors:
+        name = name.strip()
+        if name and name.lower() not in (a.lower() for a in authors):
+            authors.append(name)
+    return authors
+
+
+# ---------------------------------------------------------------------------
 # Main handler
 # ---------------------------------------------------------------------------
 
 
 def handle_trigger_comment(comment, conn):
     try:
-        parent = comment.parent()
-        recipe_text = getattr(parent, "body", None)
+        source = resolve_recipe_source(comment)
+        recipe_text, source_permalink, source_author = source_text_and_author(source)
         if not recipe_text:
-            return  # parent isn't a comment with text (e.g. it's the post itself)
+            return  # linked/parent post has no usable text
 
         requested_servings = parse_requested_servings(comment.body)
 
         recipe_data = extract_recipe(recipe_text)
         if "error" in recipe_data:
-            comment.reply("I couldn't find a recipe in the comment you replied to.")
+            comment.reply("I couldn't find a recipe in the comment or post linked/replied to.")
             mark_replied(conn, comment.id)
             return
 
@@ -328,6 +385,7 @@ def handle_trigger_comment(comment, conn):
         summary = generate_summary(ingredient_names, per_serving, requested_servings)
 
         title = recipe_data.get("title", "Recipe")
+        authors = build_author_list(source_author, recipe_data.get("credited_authors", []))
         page_url = None
         try:
             page_url = publish_recipe_page(
@@ -337,7 +395,8 @@ def handle_trigger_comment(comment, conn):
                 per_serving=per_serving,
                 servings=requested_servings,
                 summary=summary,
-                reddit_comment_url=f"https://reddit.com{parent.permalink}",
+                authors=authors,
+                reddit_comment_url=source_permalink,
             )
         except Exception as e:
             print(f"GitHub Pages publish failed (continuing without link): {e}")
